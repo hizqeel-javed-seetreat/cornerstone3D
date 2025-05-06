@@ -1,5 +1,6 @@
 import { geometryLoader, Enums } from '@cornerstonejs/core';
 import assetsURL from '../../assets/assetsURL.json';
+import jsonSets from '../../assets/jsonSets.json';
 
 /**
  * Creates and caches geometries from contours
@@ -10,15 +11,15 @@ import assetsURL from '../../assets/assetsURL.json';
 export async function createAndCacheGeometriesFromContours(
   name: string
 ): Promise<string[]> {
-  const data = await fetch(assetsURL[name]).then((res) => res.json());
+  const data = jsonSets as any;
 
   const geometryIds: string[] = [];
-  data.contourSets.forEach((contourSet) => {
-    const geometryId = contourSet.id;
+  jsonSets[name].contourSets.forEach((contourSet) => {
+    const geometryId = String(contourSet.data);
     geometryIds.push(geometryId);
     return geometryLoader.createAndCacheGeometry(geometryId, {
       type: Enums.GeometryType.CONTOUR,
-      geometryData: contourSet,
+      geometryData: contourSet as any,
     });
   });
 
