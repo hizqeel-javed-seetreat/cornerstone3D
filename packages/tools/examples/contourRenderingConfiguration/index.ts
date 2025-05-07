@@ -103,7 +103,7 @@ addSliderToToolbar({
 
 async function addSegmentationsToState(type) {
   const segId = segmentationId + type;
-  const geometryIds = await createAndCacheGeometriesFromContours('axial');
+  const geometryIds = await createAndCacheGeometriesFromContours(type);
 
   segmentation.addSegmentations([
     {
@@ -223,8 +223,8 @@ async function run() {
   renderingEngine.render();
 
   const segAxId = await addSegmentationsToState('axial');
-  const segCorId = await addSegmentationsToState('sagittal');
-  const segSagId = await addSegmentationsToState('coronal');
+  const segCorId = await addSegmentationsToState('coronal');
+  const segSagId = await addSegmentationsToState('sagittal');
 
   segmentation.addSegmentationRepresentations(VP_ID.AXIAL, [
     {
