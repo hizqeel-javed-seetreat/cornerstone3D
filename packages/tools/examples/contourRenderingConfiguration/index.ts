@@ -1,22 +1,26 @@
 import type { Types } from '@cornerstonejs/core';
 import {
-  Enums,
-  geometryLoader,
   RenderingEngine,
-  setVolumesForViewports,
+  Enums,
+  imageLoader,
+  eventTarget,
   volumeLoader,
+  setVolumesForViewports,
 } from '@cornerstonejs/core';
+import * as cornerstone3D from '@cornerstonejs/core';
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import {
+  cornerstoneNiftiImageLoader,
+  createNiftiImageIdsAndCacheMetadata,
+  Enums as NiftiEnums,
+} from '@cornerstonejs/nifti-volume-loader';
 import {
   addSliderToToolbar,
   addToggleButtonToToolbar,
   createAndCacheGeometriesFromContours,
-  createImageIdsAndCacheMetaData,
   initDemo,
   setTitleAndDescription,
 } from '../../../../utils/demo/helpers';
-
-console.debug('Click on index.ts to open source code for this example ---->');
 
 const {
   ToolGroupManager,
@@ -28,15 +32,11 @@ const {
   TrackballRotateTool,
 } = cornerstoneTools;
 const { MouseBindings } = csToolsEnums;
-const { ViewportType } = Enums;
+const { ViewportType, OrientationAxis } = Enums;
 
-/* ------------------------------------------------------------------ */
-/*  ⚙️  CONSTANTS                                                     */
-/* ------------------------------------------------------------------ */
-const volumeName = 'CT_VOLUME_ID';
+const niftiURL = 'http://localhost:3001/contour';
 const volumeLoaderScheme = 'cornerstoneStreamingImageVolume';
-const volumeId = `${volumeLoaderScheme}:${volumeName}`;
-
+const volumeId = `${volumeLoaderScheme}:${niftiURL}`;
 const segmentationId = 'MY_SEGMENTATION_ID';
 const toolGroupId = 'MY_TOOLGROUP_ID';
 
@@ -46,12 +46,9 @@ const VP_ID = {
   SAGITTAL: 'CT_SAGITTAL',
 };
 
-/* ------------------------------------------------------------------ */
-/*  🖼️  PAGE LAYOUT                                                   */
-/* ------------------------------------------------------------------ */
 setTitleAndDescription(
-  'Contour Segmentation – Axial + Coronal + Sagittal',
-  'This example shows how to turn one axial viewport into a 3‑pane orthographic viewer.'
+  'NIfTI Segmentation Viewer',
+  'Display multiple planes with contour segmentation over NIfTI volume.'
 );
 
 const size = '500px';
@@ -59,7 +56,7 @@ const content = document.getElementById('content')!;
 const viewportGrid = document.createElement('div');
 viewportGrid.style.display = 'flex';
 viewportGrid.style.flexDirection = 'row';
-viewportGrid.style.gap = '4px'; // a tiny gutter
+viewportGrid.style.gap = '4px';
 
 function makeViewportElement() {
   const el = document.createElement('div');
@@ -76,12 +73,6 @@ const elementSagittal = makeViewportElement();
 viewportGrid.append(elementAxial, elementCoronal, elementSagittal);
 content.appendChild(viewportGrid);
 
-const instructions = document.createElement('p');
-content.append(instructions);
-
-/* ------------------------------------------------------------------ */
-/*  🛠️  TOOLBAR HANDLERS                                              */
-/* ------------------------------------------------------------------ */
 addToggleButtonToToolbar({
   title: 'Hide All Segments',
   onClick: (toggle) => {
@@ -92,38 +83,6 @@ addToggleButtonToToolbar({
           segmentationId,
           type: csToolsEnums.SegmentationRepresentations.Contour,
         },
-        !toggle
-      )
-    );
-  },
-});
-
-addToggleButtonToToolbar({
-  title: 'Hide Red Segment',
-  onClick: (toggle) => {
-    const segmentIndex = 1;
-    Object.values(VP_ID).forEach((vp) =>
-      segmentation.config.visibility.setSegmentIndexVisibility(
-        vp,
-        segmentationId,
-        csToolsEnums.SegmentationRepresentations.Contour,
-        segmentIndex,
-        !toggle
-      )
-    );
-  },
-});
-
-addToggleButtonToToolbar({
-  title: 'Hide Green Segment',
-  onClick: (toggle) => {
-    const segmentIndex = 2;
-    Object.values(VP_ID).forEach((vp) =>
-      segmentation.config.visibility.setSegmentIndexVisibility(
-        vp,
-        segmentationId,
-        csToolsEnums.SegmentationRepresentations.Contour,
-        segmentIndex,
         !toggle
       )
     );
@@ -142,12 +101,7 @@ addSliderToToolbar({
   },
 });
 
-/* ------------------------------------------------------------------ */
-/*  🏗️  SEGMENTATION SET‑UP                                           */
-/* ------------------------------------------------------------------ */
-async function addSegmentationsToState(
-  type: 'axial' | 'coronal' | 'sagittal' = 'axial'
-) {
+async function addSegmentationsToState(type) {
   const segId = segmentationId + type;
   const geometryIds = await createAndCacheGeometriesFromContours('axial');
 
@@ -160,15 +114,46 @@ async function addSegmentationsToState(
       },
     },
   ]);
-
   return segId;
 }
 
-/* ------------------------------------------------------------------ */
-/*  🚀  MAIN DEMO ENTRY                                               */
-/* ------------------------------------------------------------------ */
+function getOrientationForViewportId(viewportId) {
+  switch (viewportId) {
+    case VP_ID.AXIAL:
+      return OrientationAxis.AXIAL;
+    case VP_ID.CORONAL:
+      return OrientationAxis.CORONAL;
+    case VP_ID.SAGITTAL:
+      return OrientationAxis.SAGITTAL;
+    default:
+      return OrientationAxis.AXIAL;
+  }
+}
+
+async function setVolumeForViewports(renderingEngine, volumeId, viewportIds) {
+  for (const viewportId of viewportIds) {
+    const viewport = renderingEngine.getViewport(viewportId);
+    if (viewport instanceof cornerstone3D.VolumeViewport) {
+      await viewport.setVolumes([{ volumeId }]);
+      const orientation = getOrientationForViewportId(viewportId);
+      viewport.setOrientation(orientation);
+
+      // Set default HNC window level for all viewports
+      viewport.setProperties({
+        voiRange: {
+          lower: 40 - 350 / 2,
+          upper: 40 + 350 / 2,
+        },
+      });
+    } else {
+      console.warn(`Viewport ${viewportId} is not a VolumeViewport. Skipping.`);
+    }
+  }
+}
+
 async function run() {
   await initDemo();
+  imageLoader.registerImageLoader('nifti', cornerstoneNiftiImageLoader);
 
   cornerstoneTools.addTool(PanTool);
   cornerstoneTools.addTool(ZoomTool);
@@ -176,7 +161,6 @@ async function run() {
   cornerstoneTools.addTool(TrackballRotateTool);
 
   const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
-
   toolGroup.addTool(PanTool.toolName);
   toolGroup.addTool(ZoomTool.toolName);
   toolGroup.addTool(StackScrollTool.toolName);
@@ -191,32 +175,22 @@ async function run() {
     bindings: [{ mouseButton: MouseBindings.Wheel }],
   });
 
-  const imageIds = await createImageIdsAndCacheMetaData({
-    StudyInstanceUID:
-      '1.3.6.1.4.1.14519.5.2.1.7009.2403.334240657131972136850343327463',
-    SeriesInstanceUID:
-      '1.3.6.1.4.1.14519.5.2.1.7009.2403.226151125820845824875394858561',
-    wadoRsRoot: 'https://d14fa38qiwhyfd.cloudfront.net/dicomweb',
-  });
-
+  const imageIds = await createNiftiImageIdsAndCacheMetadata({ url: niftiURL });
   const volume = await volumeLoader.createAndCacheVolume(volumeId, {
     imageIds,
   });
-  const segAxId = await addSegmentationsToState('axial');
-  const segCorId = await addSegmentationsToState('sagittal');
-  const segSagId = await addSegmentationsToState('coronal');
+  await volume.load();
 
   const renderingEngineId = 'myRenderingEngine';
   const renderingEngine = new RenderingEngine(renderingEngineId);
 
-  /* ------------ VIEWPORT DEFINITIONS ------------------------------ */
   const viewportInputArray = [
     {
       viewportId: VP_ID.AXIAL,
       type: ViewportType.ORTHOGRAPHIC,
       element: elementAxial,
       defaultOptions: {
-        orientation: Enums.OrientationAxis.AXIAL,
+        orientation: OrientationAxis.AXIAL,
         background: <Types.Point3>[0.2, 0, 0.2],
       },
     },
@@ -225,7 +199,7 @@ async function run() {
       type: ViewportType.ORTHOGRAPHIC,
       element: elementCoronal,
       defaultOptions: {
-        orientation: Enums.OrientationAxis.CORONAL,
+        orientation: OrientationAxis.CORONAL,
         background: <Types.Point3>[0, 0.2, 0.2],
       },
     },
@@ -234,26 +208,23 @@ async function run() {
       type: ViewportType.ORTHOGRAPHIC,
       element: elementSagittal,
       defaultOptions: {
-        orientation: Enums.OrientationAxis.SAGITTAL,
+        orientation: OrientationAxis.SAGITTAL,
         background: <Types.Point3>[0.2, 0.2, 0],
       },
     },
   ];
 
   renderingEngine.setViewports(viewportInputArray);
-
-  /* ----------- LINK TOOL GROUP TO EVERY VIEWPORT ------------------ */
   Object.values(VP_ID).forEach((vp) =>
     toolGroup.addViewport(vp, renderingEngineId)
   );
 
-  volume.load();
+  await setVolumeForViewports(renderingEngine, volumeId, Object.values(VP_ID));
+  renderingEngine.render();
 
-  setVolumesForViewports(
-    renderingEngine,
-    [{ volumeId }],
-    Object.values(VP_ID) // all three viewport IDs
-  );
+  const segAxId = await addSegmentationsToState('axial');
+  const segCorId = await addSegmentationsToState('sagittal');
+  const segSagId = await addSegmentationsToState('coronal');
 
   segmentation.addSegmentationRepresentations(VP_ID.AXIAL, [
     {
@@ -261,14 +232,12 @@ async function run() {
       type: csToolsEnums.SegmentationRepresentations.Contour,
     },
   ]);
-
   segmentation.addSegmentationRepresentations(VP_ID.CORONAL, [
     {
       segmentationId: segCorId,
       type: csToolsEnums.SegmentationRepresentations.Contour,
     },
   ]);
-
   segmentation.addSegmentationRepresentations(VP_ID.SAGITTAL, [
     {
       segmentationId: segSagId,
@@ -276,53 +245,31 @@ async function run() {
     },
   ]);
 
-  const style = {
-    renderFill: false,
-  };
-
+  const style = { renderFill: false };
   segmentation.segmentationStyle.setStyle(
     {
       segmentationId: segAxId,
       viewportId: VP_ID.AXIAL,
       type: csToolsEnums.SegmentationRepresentations.Contour,
     },
-    {
-      ...style,
-    }
+    style
   );
-
   segmentation.segmentationStyle.setStyle(
     {
       segmentationId: segCorId,
       viewportId: VP_ID.CORONAL,
       type: csToolsEnums.SegmentationRepresentations.Contour,
     },
-    {
-      ...style,
-    }
+    style
   );
-
   segmentation.segmentationStyle.setStyle(
     {
       segmentationId: segSagId,
       viewportId: VP_ID.SAGITTAL,
       type: csToolsEnums.SegmentationRepresentations.Contour,
     },
-    {
-      ...style,
-    }
+    style
   );
-  /* ----------- ADD SEGMENTATION REPRESENTATION -------------------- */
-  // await Promise.all(
-  //   Object.values(VP_ID).map((vp) =>
-  //     segmentation.addSegmentationRepresentations(vp, [
-  //       {
-  //         segmentationId,
-  //         type: csToolsEnums.SegmentationRepresentations.Contour,
-  //       },
-  //     ])
-  //   )
-  // );
 
   renderingEngine.render();
 }

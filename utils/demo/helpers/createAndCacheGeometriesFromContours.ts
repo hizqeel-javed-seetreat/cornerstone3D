@@ -15,7 +15,7 @@ export async function createAndCacheGeometriesFromContours(
 
   const geometryIds: string[] = [];
   jsonSets[name].contourSets.forEach((contourSet) => {
-    const geometryId = String(contourSet.data);
+    const geometryId = String(contourSet.id);
     geometryIds.push(geometryId);
     return geometryLoader.createAndCacheGeometry(geometryId, {
       type: Enums.GeometryType.CONTOUR,
